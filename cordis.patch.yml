@@ -1,0 +1,26 @@
+# One install for a public hostname. `name` on an existing id is only a
+# guard: it must still be the official specifier or this patch is skipped.
+# The replacement rows are new ids. Point profile config at those ids.
+
+- id: ui-settings
+  name: "@deepseek-ai/dsh-client-ui-settings"
+  disabled: true
+- insert:
+    - id: ui-settings-public
+      name: ./vendor/ui-settings/lib/index.js
+
+- id: workspace-files
+  name: "@deepseek-ai/dsh-api-workspace-files"
+  disabled: true
+- insert:
+    - id: workspace-files-public
+      name: ./vendor/workspace-files/lib/index.js
+
+- insert:
+    - id: dsh-public
+      name: dsh-public
+      config:
+        # Bare host or host:port. This is the hostname you put in place of
+        # 127.0.0.1 on the token URL printed by `dsh web`.
+        hosts:
+          - dsh.timidly.hfnl.app.chenzhaoyun.com
