@@ -17,8 +17,8 @@
       name: ./vendor/workspace-files/lib/index.js
 
 - insert:
-    - id: dsh-public
-      name: dsh-public
+    - id: dsh-public-web
+      name: dsh-public-web
       config:
         # Bare host or host:port. This is the hostname you put in place of
         # 127.0.0.1 on the token URL printed by `dsh web`.

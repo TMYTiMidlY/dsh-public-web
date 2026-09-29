@@ -1,4 +1,4 @@
-# dsh-public
+# dsh-public-web
 
 让官方安装的 DeepSeek Harness 在公网域名上能用。装上这个包之后，把 `dsh web` 打印的 token 地址里的主机名换成你的域名，设置页和侧边栏文件预览都走官方界面。
 
@@ -14,10 +14,10 @@
 
 ```bash
 pnpm pack
-dsh plugin --profile web add ./dsh-public-0.1.3.tgz
+dsh plugin --profile web add ./dsh-public-web-0.1.3.tgz
 ```
 
-`hosts` 是 `host` 或 `host:port`。换域名时改插件配置里的这一项；后写的 profile patch 会整段替换 `dsh-public` 的 config，所以要保留 `hosts`。
+`hosts` 是 `host` 或 `host:port`。换域名时改插件配置里的这一项；后写的 profile patch 会整段替换 `dsh-public-web` 的 config，所以要保留 `hosts`。
 
 同一个 tarball 可以装到别的 Web profile。无界面的 profile 不要装：它依赖 Web 运行时。
 

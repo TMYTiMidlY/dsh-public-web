@@ -1,5 +1,5 @@
 {
-  "name": "dsh-public",
+  "name": "dsh-public-web",
   "version": "0.1.3",
   "private": true,
   "description": "Use an official DeepSeek Harness web profile on a public hostname, with a trusted host, writable settings, and sidebar file preview.",

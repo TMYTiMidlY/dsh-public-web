@@ -1506,7 +1506,7 @@ window.__ModuleLoader__.load({
 		*/
 		function apply(ctx) {
 			const schema = new SettingsSchemaService(ctx);
-			// dsh-public: a public hostname is already inside the Host fence. Keep
+			// dsh-public-web: a public hostname is already inside the Host fence. Keep
 			// Host settings writable there; loopback pages already used this mode.
 			const persistence = "host";
 			const mirror = new SettingsDescribeMirror(ctx, persistence);
