@@ -1,6 +1,6 @@
 {
-  "name": "@deepseek-ai/dsh-api-workspace-files",
-  "version": "0.1.7-rc.2-dsh-public.1",
+  "name": "@deepseek-ai/dsh-client-resources",
+  "version": "0.2.1-alpha.1",
   "private": true,
   "type": "module",
   "main": "lib/index.js",
@@ -11,8 +11,7 @@
   "dsh": {
     "client": {
       "inject": [
-        "@deepseek-ai/dsh-api-gateway",
-        "@deepseek-ai/dsh-client-resources",
+        "@deepseek-ai/dsh-client-ui-renderer",
         "dsh-public-web"
       ],
       "platform": "web"

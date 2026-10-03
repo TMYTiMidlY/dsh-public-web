@@ -5,6 +5,7 @@ window.__ModuleLoader__.load({
 		var exports = module.exports;
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 		require("@deepseek-ai/cordis");
+		const publicWeb = require("dsh-public-web");
 		//#region lib/types/client/change-feed.js
 		/**
 		* The follower key of one absolute path.
@@ -360,68 +361,12 @@ window.__ModuleLoader__.load({
 					}
 					const { sessionId, path } = resolved.value;
 					const notices = changes.follow(sessionId, path, signal);
-					const stat = () => remote.workspaceFiles.stat(sessionId, path, signal);
-					const aborted = () => signal.aborted;
-					let current;
-					try {
-						// A proxy can accept /api/remote.mux and then never deliver the
-						// watch acknowledgement. Waiting forever leaves the sidebar on
-						// the loading state. A healthy socket acknowledges immediately
-						// and keeps the live follow; a late or missing ack still shows
-						// the file from one stat.
-						const acknowledged = await Promise.race([
-							notices.ready,
-							new Promise((resolve) => {
-								const timer = setTimeout(() => resolve(false), 800);
-								const stop = () => {
-									clearTimeout(timer);
-									resolve(false);
-								};
-								if (signal.aborted) stop();
-								else signal.addEventListener("abort", stop, { once: true });
-							})
-						]);
-						if (!acknowledged) {
-							if (aborted()) return;
-							const result = await stat();
-							if (!aborted()) yield result;
-							return;
-						}
-						if (aborted()) return;
-						const first = await stat();
-						if (aborted()) return;
-						if (first.ok) {
-							notices.bind(first.value.absolutePath);
-							current = first.value;
-							yield {
-								ok: true,
-								value: current
-							};
-						} else yield first;
-						for await (const notice of notices) {
-							if (aborted()) return;
-							if (current === void 0) {
-								if (notice.kind === "absent") continue;
-							} else if (notice.kind === "changed") {
-								if (notice.version === current.version) continue;
-							}
-							const again = await stat();
-							if (aborted()) return;
-							if (!again.ok) {
-								current = void 0;
-								yield again;
-								continue;
-							}
-							notices.bind(again.value.absolutePath);
-							current = again.value;
-							yield {
-								ok: true,
-								value: current
-							};
-						}
-					} finally {
-						notices.dispose();
-					}
+					yield* publicWeb.openFileFrames(
+						notices,
+						() => remote.workspaceFiles.stat(sessionId, path, signal),
+						signal,
+						{ watchAckTimeoutMs: window.__DSH_PUBLIC_WEB_CONFIG__?.watchAckTimeoutMs },
+					);
 				}
 			};
 		}

@@ -4,6 +4,9 @@
   "private": true,
   "description": "Use an official DeepSeek Harness web profile on a public hostname, with a trusted host, writable settings, and sidebar file preview.",
   "type": "module",
+  "scripts": {
+    "test": "node --test --test-isolation=none tests/*.test.js"
+  },
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",

@@ -2,6 +2,13 @@
 # guard: it must still be the official specifier or this patch is skipped.
 # The replacement rows are new ids. Point profile config at those ids.
 
+- id: resources
+  name: "@deepseek-ai/dsh-client-resources"
+  disabled: true
+- insert:
+    - id: resources-public
+      name: ./vendor/resources/lib/index.js
+
 - id: ui-settings
   name: "@deepseek-ai/dsh-client-ui-settings"
   disabled: true
@@ -20,7 +27,7 @@
     - id: dsh-public-web
       name: dsh-public-web
       config:
-        # Bare host or host:port. This is the hostname you put in place of
-        # 127.0.0.1 on the token URL printed by `dsh web`.
-        hosts:
-          - dsh.timidly.hfnl.app.chenzhaoyun.com
+        # Prefer the official --trusted-host flag. This optional list keeps
+        # existing deployments working; add only your own bare host[:port].
+        hosts: []
+        watchAckTimeoutMs: 800
