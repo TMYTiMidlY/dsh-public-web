@@ -1,6 +1,12 @@
 # dsh-public-web
 
+[![Package version](https://img.shields.io/badge/package-0.1.3-blue)](package.json)
+[![DSH checked](https://img.shields.io/badge/DSH%20checked-0.2.1--alpha.1-3776ab)](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-alpha.1)
+[![Official clients reused](https://img.shields.io/badge/official%20clients-reused-success)](#official-clients)
+
 这个仓库补齐官方 DeepSeek Harness Web 在远程浏览器中的设置与文件预览能力，并维护直接访问官方 Web 的部署指南。浏览器通过公网 HTTPS 域名连接正在运行的 `dsh web`，设置、文件读取与会话继续使用官方后端。
+
+## <a id="features"></a>功能
 
 截至 `dsh-v0.2.1-alpha.1`，官方已经具备公网主机放行、浏览器会话认证和公网地址公告。这个插件解决的是另外三个浏览器端问题：
 
@@ -8,47 +14,57 @@
 - **文件资源地址。** 当浏览器无法正确解析 `dsh-resource://file/…` 时，插件在资源客户端内补上解析。
 - **文件首次加载。** 文件变更订阅确认迟迟不来时，插件先读取文件供用户查看；确认到达后继续自动更新。
 
-> 核对日期：2026-10-03。下文的官方行为按本地 `dsh-v0.2.1-alpha.1` 源码核实。安装与复用官方组件的方式见[安装与配置](#install)。
+插件直接复用当前 DSH 安装中的官方设置、资源与文件组件，包内只维护局部兼容逻辑。升级 DSH 后，页面使用新安装提供的官方组件，详见[工作原理](#official-clients)。
 
-## <a id="contents"></a>阅读入口
+> 官方行为核对日期：2026-10-03，依据本地 `dsh-v0.2.1-alpha.1` 源码。上方 DSH 徽章标明这次核对的版本。
 
-- [DSH 与本仓的版本历史](#history)
-- [Caddy 公网部署](#remote-access-methods)
-- [官方参数：trusted-host 与 public-url](#public-url)
-- [请求校验与浏览器会话](#web-trusted-host)
-- [远程设置为何需要插件](#client-isloopback)
-- [文件兼容与诊断](#file-compatibility)
+## <a id="contents"></a>目录
+
+- [安装与配置](#install)
+- [远程 Web 部署](#remote-access-methods)
+- [使用与诊断](#usage)
+- [工作原理](#implementation)
 - [安全边界](#security-boundaries)
-- [安装、升级和卸载](#install)
+- [升级与卸载](#upgrade)
+- [开发与验证](#development)
+- [DSH 与本仓的版本历史](#history)
 
-## <a id="history"></a>DSH 与本仓的版本历史
+## <a id="install"></a>安装与配置
 
-以下记录与直接远程 Web 有关的变化。各版本完整发布记录见 [DSH releases](https://github.com/deepseek-ai/deepseek-harness/releases)。
+在已安装 DSH 的主机上，先按[Caddy 公网部署](#caddy-public-entry)完成 TLS、登录门禁、可信主机与会话配置。需要远程设置管理或文件兼容时，在对应用户的 Web profile 安装本插件。获准访问该实例的用户将能管理 Host 设置，权限范围见[安全边界](#security-boundaries)。
 
-| 版本或提交 | 相关变化 | 对远程 Web 的影响 |
+### 安装
+
+在本仓目录中，将当前插件代码打包到新建的私有产物目录，再安装这个产物：
+
+```sh
+npm pack --pack-destination <private-package-directory>
+dsh plugin --profile web add <private-package-directory>/dsh-public-web-0.1.3.tgz
+```
+
+安装后重启目标 profile 的 DSH 服务并完整刷新浏览器页面，让页面加载兼容脚本。这个 tarball 装入的是本仓的兼容逻辑；官方客户端由运行中的 DSH 安装提供。
+
+### 插件配置
+
+默认配置如下，可在对应 Web profile 的 `cordis.patch.yml` 中按 id 覆盖：
+
+```yaml
+- id: dsh-public-web
+  config:
+    hosts: []
+    watchAckTimeoutMs: 800
+```
+
+| 配置项 | 默认值 | 用途 |
 |---|---|---|
-| DSH `0.1.1-rc.2` 及更早 | 本机管理接口另有只接受 loopback 的校验；尚无统一浏览器会话 | 当时的反代教程常改写 Host/Origin，适用边界见[旧版本的 loopback 特权](#loopback-privilege-history) |
-| DSH `0.1.2-alpha.1` | 启动 token 兑换签名 cookie；本机与远程请求统一认证 | 可信主机与有效会话成为两项独立条件 |
-| DSH `0.1.2-alpha.2` | Settings 接入新 Remote namespace，继续按浏览器页面的 loopback 判定选择持久化方式 | 远程设置限制保留 |
-| DSH `0.1.5-alpha.1` 起 | 引入资源 registry 与双面 workspace-files | 资源 provider 选择依赖 URL hostname，首次文件读取等待变更订阅确认 |
-| DSH `0.1.7-alpha.1` 起 | API/插件资源使用相对文档目录；token 兑换重定向为 `./`；改进侧栏刷新和 watcher 生命周期 | 为带路径前缀的代理提供基础；远程设置及两个文件兼容问题仍保留 |
-| DSH `0.1.7-rc.2` | 可信公网 Host 与有效会话可以使用官方 API | 远程页面的设置镜像仍选择 `memory` 并进入 `unavailable` |
-| 本仓 [`3fde359`](https://github.com/TMYTiMidlY/dsh-public-web/commit/3fde359)，2026-09-29 | 加入远程 Host 设置、资源 URL 兼容与 800ms 文件读取兜底 | 当时附带客户端副本；文件超时后只显示一次，URL 兼容作用于全局 |
-| 本仓 [`6b28476`](https://github.com/TMYTiMidlY/dsh-public-web/commit/6b28476)，2026-09-29 | 包名改为 `dsh-public-web`，版本保留 `0.1.3` | 旧 `dsh-public-*.tgz` 文件名属于历史产物 |
-| DSH [`0.2.0-rc.1`](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.0-rc.1) | 改善插件管理、配置保存等待和 Office/PDF 预览 | 这些更新改善了日常使用；远程设置判定和订阅确认等待的实现延续 |
-| DSH [`0.2.0-rc.2`](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.0-rc.2) | 改善设置预设、文件夹本地打开与模型选择 | 打开本机文件夹与浏览器文件预览属于不同路径；本仓针对的客户端行为延续 |
-| DSH [`0.2.1-alpha.1`](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-alpha.1) | 新增 `--public-url`，改善 Markdown frontmatter 与插件依赖管理 | 公网地址公告使用官方能力；设置与文件兼容仍由本仓补齐 |
-| 本仓当前代码，2026-10-04 | 直接复用已安装的官方组件，按需施加局部补丁；文件确认晚到后继续更新；增加配置和诊断 | 插件包只维护兼容逻辑，官方组件随 DSH 安装更新 |
+| `hosts` | `[]` | 可选的可信主机补充；当前部署优先通过官方 `--trusted-host` 配置，保持此项为空 |
+| `watchAckTimeoutMs` | `800` | 文件订阅超过多少毫秒仍未确认时，先显示文件；取值为 1–60000 的整数 |
 
-相关实现可核对：[当前设置持久化选择](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/packages/client/ui-settings/src/client/index.ts)、[当前文件订阅等待](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/packages/api/workspace-files/src/client/provider.ts)、[当前资源协议解析](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/packages/client/resources/src/client/resources.ts)。历史接线见[相对目录与前缀反代](https://github.com/deepseek-ai/deepseek-harness/commit/eeb9b03465)、[侧栏刷新](https://github.com/deepseek-ai/deepseek-harness/commit/c71e907490)和[watcher 生命周期](https://github.com/deepseek-ai/deepseek-harness/commit/4f55590aea)。
+已有部署若用本插件声明可信主机，可填写 `hosts: [dsh.example.com]`。Profile 的 `config` 整段替换，覆盖时保留实际需要的字段。修改等待预算后重新加载页面，详见[文件订阅确认](#file-watch-ack)。
 
-### <a id="loopback-privilege-history"></a>旧版本的 loopback 特权
+`--trusted-host` 与 `--public-url` 配置在 `dsh web` 命令或 systemd `ExecStart` 中，具体作用见[官方启动参数](#public-url)。
 
-`0.1.1-rc.2` 及更早版本的 Settings、Credentials、Agent preset、宿主文件管理与模型发现接口还要求 loopback Host/Origin。旧部署把两者成对改写到 loopback，是为了通过那时的本机管理限制。`0.1.2-alpha.1` 引入统一会话后，这组接口也按会话认证处理。当前部署按[官方反代指南](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/docs/user/guide/public-deployments.zh.md)保留公网 Host，并声明匹配的可信主机。
-
-历史依据：[旧版本机管理接口校验](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/packages/client/connection/src/index.ts#L69-L154)、[`0.1.2-alpha.1` 浏览器认证](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.1.2-alpha.1/packages/client/connection/src/browser-auth.ts)。
-
-## <a id="remote-access-methods"></a>直接远程访问官方 Web
+## <a id="remote-access-methods"></a>远程 Web 部署
 
 长期使用的路径是：
 
@@ -101,31 +117,7 @@
 
 Caddy 的转发行为见 [reverse_proxy 官方文档](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)；DSH 的入口要求见[官方公网部署指南](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/docs/user/guide/public-deployments.zh.md)。
 
-### 挂载到路径前缀
-
-根域名入口最直接。如果入口是 `https://dsh.example.com/ui/`，代理需剥离 `/ui/` 再转发，裸 `/ui` 重定向到 `/ui/`，所有页面请求和 WebSocket 也经过同一挂载。浏览器自行持有 DSH cookie 时，还需把上游 `Path=/` 改成 `/ui/` 并添加 `Secure`；Caddy 代持时按上节保留会话于代理即可。`--public-url https://dsh.example.com/ui/` 公告这个入口，实际路由由代理配置。
-
-### <a id="ssh-tunnel"></a>临时 SSH 本地入口
-
-从浏览器所在机器建立转发：
-
-```sh
-ssh -N -L 13080:127.0.0.1:3080 <host>
-```
-
-然后在 `http://127.0.0.1:13080/?token=…` 下用当前启动 token 兑换一次。浏览器的 loopback Host 已受信，cookie 绑定的是浏览器所用的 `127.0.0.1:13080`。该入口下官方设置镜像也会选择 Host 持久化。
-
-### <a id="tcp-relay"></a>跨节点的私有上游
-
-Caddy 与 DSH 分处不同节点或网络 namespace 时，先让网关通过受控私网或隧道连接 DSH，再使用同一套 HTTP 代理配置。例如需要 TCP relay 时：
-
-```sh
-socat TCP-LISTEN:<relay-port>,bind=<private-address>,fork,reuseaddr TCP:127.0.0.1:3080
-```
-
-绑定地址、防火墙和来源 ACL 将它限制给可信网关。DSH 继续看到浏览器的公网 Host；公网 TLS、门禁与 cookie 注入仍由 Caddy 负责。
-
-## <a id="public-url"></a>官方参数：trusted-host 与 public-url
+### <a id="public-url"></a>官方启动参数
 
 | 参数 | 作用 | 在上述部署中的选择 |
 |---|---|---|
@@ -140,9 +132,9 @@ socat TCP-LISTEN:<relay-port>,bind=<private-address>,fork,reuseaddr TCP:127.0.0.
 
 源码依据：[参数接线](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/packages/bundle/web-app/src/index.ts#L245-L295)、[URL 格式校验](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/packages/bundle/web-app/src/public-url.ts)、[persona 与环境变量接线](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/packages/bundle/web-app/cordis.patch.yml#L187-L208)。
 
-## <a id="web-trusted-host"></a>请求校验与浏览器会话
+### <a id="web-trusted-host"></a>请求校验与浏览器会话
 
-### <a id="browser-session-auth"></a>请求怎样被接受
+#### <a id="browser-session-auth"></a>请求怎样被接受
 
 DSH 使用请求实际携带的 `Host` 做判断。`dsh.example.com` 是公网 Host；`127.0.0.1:3080` 是 Caddy 连接的上游地址。两个值分别承担 HTTP 身份和网络连接的职责。
 
@@ -157,7 +149,7 @@ API 与 WebSocket 按顺序检查：
 
 当前依据：[API 请求信任判定](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/packages/client/connection/src/api-request-trust.ts)、[RPC 准入](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/packages/client/connection/src/rpc-host.ts#L96-L117)、[index 与会话认证](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/packages/client/connection/src/browser-auth.ts#L238-L312)。
 
-### <a id="browser-session-lifecycle"></a>会话如何取得和失效
+#### <a id="browser-session-lifecycle"></a>会话如何取得和失效
 
 DSH 每个进程生成一枚启动 token，并打印应用根的 `?token=…` URL。应用根收到有效 token 后签发 cookie，303 重定向到干净的 `./`。后续页面、API 与 WebSocket 使用 cookie。
 
@@ -177,7 +169,7 @@ token 可在当前进程内多次兑换；普通访问沿用 cookie 已封定的
 
 源码依据：[token、cookie 与签名密钥](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/packages/client/connection/src/browser-auth.ts)、[寿命默认值](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/packages/client/connection/src/index.ts#L92-L113)。
 
-### <a id="launch-token-journal"></a>从当前进程取得 token 并兑换
+#### <a id="launch-token-journal"></a>从当前进程取得 token 并兑换
 
 systemd 托管时，先限定当前 MainPID 读取启动 URL。以下以系统模板服务为例；用户服务在两个命令中加 `--user` 并使用其实际 unit 名：
 
@@ -215,7 +207,7 @@ unset DSH_LAUNCH_TOKEN DSH_SERVICE_PID DSH_SERVICE_UNIT
 
 兑换成功证明 cookie 已签发；配置正确的 `--trusted-host` 后，再验收实际 API 与 WebSocket。
 
-### <a id="cookie-max-age-patch"></a>配置会话寿命
+#### <a id="cookie-max-age-patch"></a>配置会话寿命
 
 在 Web profile 的 `cordis.patch.yml` 顶层按 id 覆盖官方 `connection` 条目。例如将寿命改成 90 天：
 
@@ -228,46 +220,35 @@ unset DSH_LAUNCH_TOKEN DSH_SERVICE_PID DSH_SERVICE_UNIT
 
 `config` 整段替换，因此一并保留 `trustedHosts`。先把该条目存成独立草稿，用 `dsh --profile web --patch ./draft.cordis.yml --dump-config` 检查合成树里只有一个 `id: connection`，且包含两个字段，再写入目标 profile。live profile 会按官方 Loader 生命周期重载；配置检查与真实入口验收分别完成。
 
-## <a id="client-isloopback"></a>远程设置为何需要插件
+### 挂载到路径前缀
 
-官方浏览器 Client 按页面 hostname 计算 `isLoopback`。公网域名页面得到 false；Caddy 如何连接上游、是否代持 cookie，都保持地址栏中的公网域名。
+根域名入口最直接。如果入口是 `https://dsh.example.com/ui/`，代理需剥离 `/ui/` 再转发，裸 `/ui` 重定向到 `/ui/`，所有页面请求和 WebSocket 也经过同一挂载。浏览器自行持有 DSH cookie 时，还需把上游 `Path=/` 改成 `/ui/` 并添加 `Secure`；Caddy 代持时按[Caddy 部署](#caddy-public-entry)保留会话于代理即可。`--public-url https://dsh.example.com/ui/` 公告这个入口，实际路由由代理配置。
 
-截至 `0.2.1-alpha.1`，官方 `ui-settings` 按这个值选择持久化方式：loopback 页面使用 `host`，远程页面使用 `memory`。后者的设置镜像初始化为 `unavailable`，读取与补读在客户端短路。因此远程页面虽已通过认证，Models 仍可出现“settings are unavailable in this browser”，General 显示不可用，部分 Plugins 与权限预设内容缺失。
+### <a id="ssh-tunnel"></a>临时 SSH 本地入口
 
-本插件使设置镜像使用 Host 持久化，保留官方设置表单、后端接口与认证。设置管理请求由实际部署中的门禁与 DSH 会话保护。[临时 SSH 入口](#ssh-tunnel)下，页面本身是 loopback，官方组件也会选择 Host 持久化。
+从浏览器所在机器建立转发：
 
-源码依据：[页面 loopback 判定](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/packages/client/connection/src/client/index.ts#L247-L249)、[设置 persistence 选择](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/packages/client/ui-settings/src/client/index.ts)、[设置镜像的 memory 行为](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/packages/client/ui-settings/src/client/settings-mirror.ts)。
-
-## <a id="file-compatibility"></a>文件兼容与诊断
-
-### <a id="resource-url-compatibility"></a>资源 URL 解析
-
-官方 `protocolOf()` 使用 `new URL(address).hostname` 为 `dsh-resource://file/…` 选择 provider。某些浏览器的非标准 scheme 解析给出空 hostname，就会显示“文件资源服务不可用”。本仓旧版按启动探测结果替换全局 `window.URL`；当前代码只在资源客户端自己的解析边界兜底，保留原生 URL 和它的静态方法。
-
-客户端启动时探测原生行为：正常为 `not-needed`，需兼容时为 `enabled`，异常为 `failed`。正常浏览器沿用原生解析；需兼容时，插件在官方资源 registry 的创建入口补齐尚未识别的资源协议。官方已经正确识别的地址继续使用原结果。该补丁随资源服务的生命周期恢复原入口，页面原生 `window.URL` 始终保留。
-
-实现见[浏览器兼容层](lib/client.js)。资源客户端与文件地址解析器直接使用当前 DSH 安装提供的代码。
-
-### <a id="file-watch-ack"></a>文件订阅确认与首帧
-
-官方客户端先等待 `workspaceFiles.changes` 的订阅确认，才请求 `stat`。代理或连接异常导致确认迟迟不来时，文件预览可以一直停在加载状态。
-
-当前补丁保留原订阅：正常及时确认时按官方流程显示文件；等待超过预算时先读取一次 `stat` 显示文件，继续等待确认。确认晚到后再读取一次以覆盖等待期间的变化，然后恢复实时更新。订阅永不确认时，初次读取仍可显示文件，但此时没有实时更新；关闭预览或取消操作会结束等待并释放订阅。这个补丁不修复代理或连接本身。
-
-等待预算从 Host 配置注入页面，默认 800 毫秒，可在 Profile patch 覆盖本插件条目：
-
-```yaml
-- id: dsh-public-web
-  config:
-    hosts: [] # 由官方 --trusted-host 管理时保持为空
-    watchAckTimeoutMs: 800
+```sh
+ssh -N -L 13080:127.0.0.1:3080 <host>
 ```
 
-`watchAckTimeoutMs` 必须是 1–60000 的整数；Host 对非法值报错。这里的预算仅决定何时先显示文件，不限制整个文件请求或订阅寿命。修改后重新加载页面以取得新的页面注入配置。
+然后在 `http://127.0.0.1:13080/?token=…` 下用当前启动 token 兑换一次。浏览器的 loopback Host 已受信，cookie 绑定的是浏览器所用的 `127.0.0.1:13080`。该入口下官方设置镜像也会选择 Host 持久化。
 
-实现见[浏览器兼容层](lib/client.js)与[Host 页面注入](lib/index.js)。官方文件客户端继续完成文件读取与刷新，插件只为慢订阅提供提前读取的时机。
+### <a id="tcp-relay"></a>跨节点的私有上游
 
-### <a id="diagnostics"></a>浏览器诊断与证据范围
+Caddy 与 DSH 分处不同节点或网络 namespace 时，先让网关通过受控私网或隧道连接 DSH，再使用同一套 HTTP 代理配置。例如需要 TCP relay 时：
+
+```sh
+socat TCP-LISTEN:<relay-port>,bind=<private-address>,fork,reuseaddr TCP:127.0.0.1:3080
+```
+
+绑定地址、防火墙和来源 ACL 将它限制给可信网关。DSH 继续看到浏览器的公网 Host；公网 TLS、门禁与 cookie 注入仍由 Caddy 负责。
+
+## <a id="usage"></a>使用与诊断
+
+通过真实公网入口登录后，验证 Models/General 设置能够读取和保存。打开文件并修改内容，确认预览随之更新；关闭预览再打开，检查订阅可以正常结束和重新建立。升级 DSH 或替换插件后，完成同样的入口检查。
+
+### <a id="diagnostics"></a>浏览器诊断
 
 在 DSH 页面开发者工具的 Console 中执行：
 
@@ -291,7 +272,57 @@ window.__dshPublicWebDiagnostics()
 
 计数每项最多 65535，最近事件最多保留 20 条。事件只含类别、时间和有上限的耗时。同类兼容警告在页面内只输出一次。诊断保存在当前浏览器页面，可用于判断实际触发情况；文件路径、内容、会话 ID 与认证凭据均不进入记录。
 
-历史服务日志的证据有限：2026-10-03 检查作者 timidly 的 journal，保留范围为 9 月 15 日至 10 月 3 日，排除 sudo 命令审计后，未找到 URL 兼容或文件确认降级记录；旧代码也没有记录这些触发。新诊断可判断实际需要哪些补丁，以及等待预算是否适合当前连接。持续超时时继续检查 HTTP RPC 与 WebSocket/流请求的代理路径。
+### 诊断结果怎样使用
+
+查看 `watch-ack-timeout` 与 `watch-ack-late`，判断是否触发提前读取，以及等待预算是否适合当前连接。持续超时时继续检查 HTTP RPC 与 WebSocket/流请求的代理路径。若出现 `*-unsupported`，按事件指向的组件检查兼容入口，详见[官方组件复用](#official-clients)。
+
+历史服务日志的证据有限：2026-10-03 检查作者 timidly 的 journal，保留范围为 9 月 15 日至 10 月 3 日，排除 sudo 命令审计后，未找到 URL 兼容或文件确认降级记录；旧代码也没有记录这些触发。实际需要哪些补丁，应结合当前浏览器诊断判断。
+
+## <a id="implementation"></a>工作原理
+
+### <a id="official-clients"></a>直接复用官方组件
+
+[cordis.patch.yml](cordis.patch.yml) 只插入本插件自己的 Host 条目。官方设置、资源与工作区文件条目保持启用，服务端和浏览器端都由当前 DSH 安装提供；本包只包含页面兼容脚本、配置与说明。
+
+[Host 入口](lib/index.js) 在官方客户端注册前注入[页面兼容层](lib/client.js)。兼容层保留官方模块的导出、依赖与主体实现，只为三个入口提供局部适配：
+
+| 官方组件 | 兼容层提供什么 |
+|---|---|
+| 设置 | 该设置组件初始化时使用 Host 持久化；其他组件继续看到实际连接信息 |
+| 资源 | 浏览器解析探测失败时，补齐官方资源创建结果中缺失的协议 |
+| 文件 | 订阅超时先触发官方读取，保留原订阅；实际确认到达后继续使用官方刷新与文件解析 |
+
+升级 DSH 后，官方组件直接来自新安装，正常继承上游更新。官方已正确解析的资源沿用其结果。若上游改变某个适配入口的接口，兼容层记录该项 `*-unsupported` 并继续使用官方行为；根据这个具体变化维护相应补丁即可。
+
+### <a id="client-isloopback"></a>远程设置
+
+官方浏览器 Client 按页面 hostname 计算 `isLoopback`。公网域名页面得到 false；Caddy 如何连接上游、是否代持 cookie，都保持地址栏中的公网域名。
+
+截至 `0.2.1-alpha.1`，官方 `ui-settings` 按这个值选择持久化方式：loopback 页面使用 `host`，远程页面使用 `memory`。后者的设置镜像初始化为 `unavailable`，读取与补读在客户端短路。因此远程页面虽已通过认证，Models 仍可出现“settings are unavailable in this browser”，General 显示不可用，部分 Plugins 与权限预设内容缺失。
+
+本插件使设置镜像使用 Host 持久化，保留官方设置表单、后端接口与认证。设置管理请求由实际部署中的门禁与 DSH 会话保护。[临时 SSH 入口](#ssh-tunnel)下，页面本身是 loopback，官方组件也会选择 Host 持久化。
+
+源码依据：[页面 loopback 判定](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/packages/client/connection/src/client/index.ts#L247-L249)、[设置 persistence 选择](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/packages/client/ui-settings/src/client/index.ts)、[设置镜像的 memory 行为](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/packages/client/ui-settings/src/client/settings-mirror.ts)。
+
+### <a id="file-compatibility"></a>文件预览
+
+#### <a id="resource-url-compatibility"></a>资源 URL 解析
+
+官方 `protocolOf()` 使用 `new URL(address).hostname` 为 `dsh-resource://file/…` 选择 provider。某些浏览器的非标准 scheme 解析给出空 hostname，就会显示“文件资源服务不可用”。本仓旧版按启动探测结果替换全局 `window.URL`；当前代码只在资源客户端自己的解析边界兜底，保留原生 URL 和它的静态方法。
+
+客户端启动时探测原生行为：正常为 `not-needed`，需兼容时为 `enabled`，异常为 `failed`。正常浏览器沿用原生解析；需兼容时，插件在官方资源 registry 的创建入口补齐尚未识别的资源协议。官方已经正确识别的地址继续使用原结果。该补丁随资源服务的生命周期恢复原入口，页面原生 `window.URL` 始终保留。
+
+实现见[浏览器兼容层](lib/client.js)。资源客户端与文件地址解析器直接使用当前 DSH 安装提供的代码。
+
+#### <a id="file-watch-ack"></a>文件订阅确认与首帧
+
+官方客户端先等待 `workspaceFiles.changes` 的订阅确认，才请求 `stat`。代理或连接异常导致确认迟迟不来时，文件预览可以一直停在加载状态。
+
+当前补丁保留原订阅：正常及时确认时按官方流程显示文件；等待超过预算时先读取一次 `stat` 显示文件，继续等待确认。确认晚到后再读取一次以覆盖等待期间的变化，然后恢复实时更新。订阅永不确认时，初次读取仍可显示文件，但此时没有实时更新；关闭预览或取消操作会结束等待并释放订阅。这个补丁不修复代理或连接本身。
+
+等待预算通过[插件配置](#install)的 `watchAckTimeoutMs` 从 Host 注入页面，默认 800 毫秒，必须是 1–60000 的整数；Host 对非法值报错。这里的预算仅决定何时先显示文件，不限制整个文件请求或订阅寿命。修改后重新加载页面以取得新的页面注入配置。
+
+实现见[浏览器兼容层](lib/client.js)与[Host 页面注入](lib/index.js)。官方文件客户端继续完成文件读取与刷新，插件只为慢订阅提供提前读取的时机。
 
 ## <a id="security-boundaries"></a>安全边界
 
@@ -314,52 +345,13 @@ window.__dshPublicWebDiagnostics()
 
 > 来源：[当前 RPC operator 与准入校验](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/packages/client/connection/src/rpc-host.ts#L96-L117)、[文件服务读取范围](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/packages/api/workspace-files/src/index.ts#L1-L14)、[浏览器 cookie 和身份边界](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/packages/client/connection/README.zh.md#L37-L43)、[官方根路径认证调用](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/packages/host/frontend-static/src/index.ts#L131-L136)。
 
-## <a id="install"></a>安装、升级和卸载
+## <a id="upgrade"></a>升级与卸载
 
-### 安装与配置
+### 升级
 
-先按[Caddy 公网部署](#caddy-public-entry)完成 TLS、登录门禁、可信主机与会话配置。需要远程设置管理或文件兼容时，在对应用户的 Web profile 安装本插件。
+升级插件时，按[安装步骤](#install)将新代码打包并替换目标 profile 中的插件，然后重启服务并完整刷新浏览器页面。旧版全局 URL 包装也会在完整刷新时清除。当前包版本保留 `0.1.3`，替换同版本代码时使用新产物路径并确认实际安装内容。
 
-将当前插件代码打包到新建的私有产物目录，再安装这个产物：
-
-```sh
-npm pack --pack-destination <private-package-directory>
-dsh plugin --profile web add <private-package-directory>/dsh-public-web-0.1.3.tgz
-```
-
-这个 tarball 装入的是本仓的兼容逻辑；官方客户端由运行中的 DSH 安装提供。安装或替换插件后，重启目标 profile 的 DSH 服务并完整刷新浏览器页面，让页面加载新的前置脚本。旧版全局 URL 包装也会在完整刷新时清除。当前包版本保留 `0.1.3`，替换同版本代码时使用新产物路径并确认实际安装内容。
-
-当前部署优先使用官方 `--trusted-host`，本仓默认 `hosts: []`。已有部署也可继续用本插件声明自己的可信主机：
-
-```yaml
-- id: dsh-public-web
-  config:
-    hosts:
-      - dsh.example.com
-    watchAckTimeoutMs: 800
-```
-
-Profile 的 `config` 整段替换，覆盖时保留实际需要的字段。`--public-url` 配置在 `dsh web` 命令或 systemd `ExecStart` 中。`watchAckTimeoutMs` 的行为见[文件订阅确认](#file-watch-ack)。
-
-### 怎样复用官方组件
-
-[cordis.patch.yml](cordis.patch.yml) 只插入本插件自己的 Host 条目。官方设置、资源与工作区文件条目保持启用，服务端和浏览器端都由当前 DSH 安装提供；本包只包含页面兼容脚本、配置与说明。
-
-[Host 入口](lib/index.js) 在官方客户端注册前注入[页面兼容层](lib/client.js)。兼容层保留官方模块的导出、依赖与主体实现，只为三个入口提供局部适配：
-
-| 官方组件 | 兼容层提供什么 |
-|---|---|
-| 设置 | 该设置组件初始化时使用 Host 持久化；其他组件继续看到实际连接信息 |
-| 资源 | 浏览器解析探测失败时，补齐官方资源创建结果中缺失的协议 |
-| 文件 | 订阅超时先触发官方读取，保留原订阅；实际确认到达后继续使用官方刷新与文件解析 |
-
-升级 DSH 后，官方组件直接来自新安装，正常继承上游更新。官方已正确解析的资源沿用其结果。若上游改变某个适配入口的接口，兼容层记录该项 `*-unsupported` 并继续使用官方行为；根据这个具体变化维护相应补丁即可。
-
-### 验证与维护
-
-运行 `npm test`，检查官方模块接入、正常与迟到订阅、取消清理、原生与兼容 URL 解析、诊断边界。合成配置检查可用 `dsh --profile web --dump-config`：确认官方 `resources`、`ui-settings`、`workspace-files` 仍启用，同时存在 `dsh-public-web` 条目。
-
-部署后通过真实公网入口验证 Models/General 设置读取和保存，打开文件并改变内容，确认预览随之更新；查看[诊断](#diagnostics)判断是否触发超时或接口未适配。关闭预览再打开，检查订阅可正常结束和重新建立。升级 DSH 后完成同样的入口检查，即可判断当前官方组件与兼容层的实际组合是否正常。
+升级 DSH 后，插件直接使用新安装提供的官方组件。通过[使用与诊断](#usage)检查设置、文件更新和兼容事件，确认实际组合正常。
 
 ### 卸载
 
@@ -368,3 +360,40 @@ dsh plugin --profile web remove dsh-public-web
 ```
 
 重启目标 profile 并完整刷新页面。页面继续使用官方客户端；现有可信主机、Caddy 代理与 DSH 会话维持公网访问。设置和文件表现恢复当前官方实现，DSH 会话、配置与凭据保留。
+
+## <a id="development"></a>开发与验证
+
+在本仓目录运行测试：
+
+```sh
+npm test
+```
+
+测试覆盖官方模块接入、正常与迟到订阅、取消清理、原生与兼容 URL 解析、诊断边界。合成配置检查可用 `dsh --profile web --dump-config`：确认官方 `resources`、`ui-settings`、`workspace-files` 仍启用，同时存在 `dsh-public-web` 条目。实际部署的验收步骤见[使用与诊断](#usage)。
+
+## <a id="history"></a>DSH 与本仓的版本历史
+
+以下记录与直接远程 Web 有关的变化。各版本完整发布记录见 [DSH releases](https://github.com/deepseek-ai/deepseek-harness/releases)。
+
+| 版本或提交 | 相关变化 | 对远程 Web 的影响 |
+|---|---|---|
+| DSH `0.1.1-rc.2` 及更早 | 本机管理接口另有只接受 loopback 的校验；尚无统一浏览器会话 | 当时的反代教程常改写 Host/Origin，适用边界见[旧版本的 loopback 特权](#loopback-privilege-history) |
+| DSH `0.1.2-alpha.1` | 启动 token 兑换签名 cookie；本机与远程请求统一认证 | 可信主机与有效会话成为两项独立条件 |
+| DSH `0.1.2-alpha.2` | Settings 接入新 Remote namespace，继续按浏览器页面的 loopback 判定选择持久化方式 | 远程设置限制保留 |
+| DSH `0.1.5-alpha.1` 起 | 引入资源 registry 与双面 workspace-files | 资源 provider 选择依赖 URL hostname，首次文件读取等待变更订阅确认 |
+| DSH `0.1.7-alpha.1` 起 | API/插件资源使用相对文档目录；token 兑换重定向为 `./`；改进侧栏刷新和 watcher 生命周期 | 为带路径前缀的代理提供基础；远程设置及两个文件兼容问题仍保留 |
+| DSH `0.1.7-rc.2` | 可信公网 Host 与有效会话可以使用官方 API | 远程页面的设置镜像仍选择 `memory` 并进入 `unavailable` |
+| 本仓 [`3fde359`](https://github.com/TMYTiMidlY/dsh-public-web/commit/3fde359)，2026-09-29 | 加入远程 Host 设置、资源 URL 兼容与 800ms 文件读取兜底 | 当时附带客户端副本；文件超时后只显示一次，URL 兼容作用于全局 |
+| 本仓 [`6b28476`](https://github.com/TMYTiMidlY/dsh-public-web/commit/6b28476)，2026-09-29 | 包名改为 `dsh-public-web`，版本保留 `0.1.3` | 旧 `dsh-public-*.tgz` 文件名属于历史产物 |
+| DSH [`0.2.0-rc.1`](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.0-rc.1) | 改善插件管理、配置保存等待和 Office/PDF 预览 | 这些更新改善了日常使用；远程设置判定和订阅确认等待的实现延续 |
+| DSH [`0.2.0-rc.2`](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.0-rc.2) | 改善设置预设、文件夹本地打开与模型选择 | 打开本机文件夹与浏览器文件预览属于不同路径；本仓针对的客户端行为延续 |
+| DSH [`0.2.1-alpha.1`](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-alpha.1) | 新增 `--public-url`，改善 Markdown frontmatter 与插件依赖管理 | 公网地址公告使用官方能力；设置与文件兼容仍由本仓补齐 |
+| 本仓当前代码，2026-10-04 | 直接复用已安装的官方组件，按需施加局部补丁；文件确认晚到后继续更新；增加配置和诊断 | 插件包只维护兼容逻辑，官方组件随 DSH 安装更新 |
+
+相关实现可核对：[当前设置持久化选择](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/packages/client/ui-settings/src/client/index.ts)、[当前文件订阅等待](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/packages/api/workspace-files/src/client/provider.ts)、[当前资源协议解析](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/packages/client/resources/src/client/resources.ts)。历史接线见[相对目录与前缀反代](https://github.com/deepseek-ai/deepseek-harness/commit/eeb9b03465)、[侧栏刷新](https://github.com/deepseek-ai/deepseek-harness/commit/c71e907490)和[watcher 生命周期](https://github.com/deepseek-ai/deepseek-harness/commit/4f55590aea)。
+
+### <a id="loopback-privilege-history"></a>旧版本的 loopback 特权
+
+`0.1.1-rc.2` 及更早版本的 Settings、Credentials、Agent preset、宿主文件管理与模型发现接口还要求 loopback Host/Origin。旧部署把两者成对改写到 loopback，是为了通过那时的本机管理限制。`0.1.2-alpha.1` 引入统一会话后，这组接口也按会话认证处理。当前部署按[官方反代指南](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/docs/user/guide/public-deployments.zh.md)保留公网 Host，并声明匹配的可信主机。
+
+历史依据：[旧版本机管理接口校验](https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/packages/client/connection/src/index.ts#L69-L154)、[`0.1.2-alpha.1` 浏览器认证](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.1.2-alpha.1/packages/client/connection/src/browser-auth.ts)。
