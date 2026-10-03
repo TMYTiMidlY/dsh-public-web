@@ -1,5 +1,5 @@
 {
   "meta": {
-    "description": "Use an official DeepSeek Harness web profile on a public hostname, with a trusted host, writable settings, and sidebar file preview."
+    "description": "Extend the installed official DeepSeek Harness Web clients with remote settings and file preview compatibility."
   }
 }

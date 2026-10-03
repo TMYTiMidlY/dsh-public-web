@@ -1,28 +1,4 @@
-# One install for a public hostname. `name` on an existing id is only a
-# guard: it must still be the official specifier or this patch is skipped.
-# The replacement rows are new ids. Point profile config at those ids.
-
-- id: resources
-  name: "@deepseek-ai/dsh-client-resources"
-  disabled: true
-- insert:
-    - id: resources-public
-      name: ./vendor/resources/lib/index.js
-
-- id: ui-settings
-  name: "@deepseek-ai/dsh-client-ui-settings"
-  disabled: true
-- insert:
-    - id: ui-settings-public
-      name: ./vendor/ui-settings/lib/index.js
-
-- id: workspace-files
-  name: "@deepseek-ai/dsh-api-workspace-files"
-  disabled: true
-- insert:
-    - id: workspace-files-public
-      name: ./vendor/workspace-files/lib/index.js
-
+# Official profile entries stay active and supply their current clients.
 - insert:
     - id: dsh-public-web
       name: dsh-public-web
